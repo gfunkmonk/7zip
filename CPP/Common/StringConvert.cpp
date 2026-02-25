@@ -4,9 +4,12 @@
 
 #include "StringConvert.h"
 
+#include <iostream>
+
 #ifndef _WIN32
 // #include <stdio.h>
-#include <stdlib.h>
+#include <cstdlib>
+#include <iconv.h>
 #endif
 
 #if !defined(_WIN32) || defined(ENV_HAVE_LOCALE)
@@ -14,10 +17,13 @@
 #endif
 
 #ifdef ENV_HAVE_LOCALE
-#include <locale.h>
+#include <clocale>
 #endif
 
 static const char k_DefultChar = '_';
+
+static const char *OEMCP_NAME = "CP866";
+static const char *ACP_NAME = "CP1251";
 
 #ifdef _WIN32
 
@@ -40,7 +46,7 @@ MultiByteToWideChar(CodePage, DWORD dwFlags,
     if MB_ERR_INVALID_CHARS is set in dwFlags:
       - the function stops conversion on illegal character.
       - Return: 0. ERR: ERROR_NO_UNICODE_TRANSLATION.
-    
+
     if MB_ERR_INVALID_CHARS is NOT set in dwFlags:
       before Vista: illegal character is dropped (skipped). WinXP-64: GetLastError() returns 0.
       in Vista+:    illegal character is not dropped (MSDN). Undocumented: illegal
@@ -58,7 +64,7 @@ void MultiByteToUnicodeString2(UString &dest, const AString &src, UINT codePage)
     wchar_t *d = dest.GetBuf(src.Len());
     const char *s = (const char *)src;
     unsigned i;
-    
+
     for (i = 0;;)
     {
       Byte c = (Byte)s[i];
@@ -126,7 +132,7 @@ static void UnicodeStringToMultiByte2(AString &dest, const UString &src, UINT co
     char *d = dest.GetBuf(numRequiredBytes);
     const wchar_t *s = (const wchar_t *)src;
     unsigned i;
-    
+
     for (i = 0;;)
     {
       wchar_t c = s[i];
@@ -134,7 +140,7 @@ static void UnicodeStringToMultiByte2(AString &dest, const UString &src, UINT co
         break;
       d[i++] = (char)c;
     }
-    
+
     if (i != src.Len())
     {
       BOOL defUsed = FALSE;
@@ -166,7 +172,7 @@ static void UnicodeStringToMultiByte2(AString &dest, const UString &src, UINT co
         if (c >= 0x80 || c == 0)
           break;
       }
-      
+
       if (s[i] == 0)
       {
         char *d = dest.GetBuf(src.Len());
@@ -257,91 +263,66 @@ static void MultiByteToUnicodeString2_Native(UString &dest, const AString &src)
 }
 */
 
-bool g_ForceToUTF8 = true; // false;
-
 void MultiByteToUnicodeString2(UString &dest, const AString &src, UINT codePage)
 {
   dest.Empty();
   if (src.IsEmpty())
     return;
 
-  if (codePage == CP_UTF8 || g_ForceToUTF8)
+  if (codePage == CP_UTF8)
   {
-#if 1
     ConvertUTF8ToUnicode(src, dest);
     return;
-#endif
   }
 
-  const size_t limit = ((size_t)src.Len() + 1) * 2;
-  wchar_t *d = dest.GetBuf((unsigned)limit);
-  const size_t len = mbstowcs(d, src, limit);
-  if (len != (size_t)-1)
-  {
-    dest.ReleaseBuf_SetEnd((unsigned)len);
-
-#if WCHAR_MAX > 0xffff
-    d = dest.GetBuf();
-    for (size_t i = 0;; i++)
-    {
-      wchar_t c = d[i];
-      // printf("\ni=%2d c = %4x\n", (unsigned)i, (unsigned)c);
-      if (c == 0)
-        break;
-      if (c >= 0x10000 && c < 0x110000)
-      {
-        UString tempString = d + i;
-        const wchar_t *t = tempString.Ptr();
-
-        for (;;)
-        {
-          wchar_t w = *t++;
-          // printf("\nchar=%x\n", w);
-          if (w == 0)
-            break;
-          if (i == limit)
-            break; // unexpected error
-          if (w >= 0x10000 && w < 0x110000)
-          {
-#if 1
-            if (i + 1 == limit)
-              break; // unexpected error
-            w -= 0x10000;
-            d[i++] = (unsigned)0xd800 + (((unsigned)w >> 10) & 0x3ff);
-            w = 0xdc00 + (w & 0x3ff);
-#else
-            // w = '_'; // for debug
-#endif
-          }
-          d[i++] = w;
-        }
-        dest.ReleaseBuf_SetEnd((unsigned)i);
-        break;
+  const char *from_cp = nullptr;
+  switch (codePage) {
+    case CP_OEMCP:
+      if (OEMCP_NAME == nullptr) {
+        std::cerr << "OEMCP_NAME is null; aborting" << std::endl;
+        abort();
       }
-    }
+      from_cp = OEMCP_NAME;
+      break;
+    case CP_ACP:
+      if (ACP_NAME == nullptr) {
+        std::cerr << "ACP_NAME is null. aborting" << std::endl;
+        abort();
+      }
+      from_cp = ACP_NAME;
+      break;
+    default:
+      std::cerr << "Unsupported CP=" << codePage<< ". aborting" << std::endl;
+      abort();
+  }
 
-#endif
- 
-    /*
-    printf("\nMultiByteToUnicodeString2 (%d) %s\n", (int)src.Len(),  src.Ptr());
-    printf("char:    ");
-    for (unsigned i = 0; i < src.Len(); i++)
-      printf (" %02x", (int)(Byte)src[i]);
-    printf("\n");
-    printf("\n-> (%d) %ls\n", (int)dest.Len(), dest.Ptr());
-    printf("wchar_t: ");
-    for (unsigned i = 0; i < dest.Len(); i++)
-    {
-      printf (" %02x", (int)dest[i]);
-    }
-    printf("\n");
-    */
+  auto cd = iconv_open("WCHAR_T", from_cp);
+  if (cd == reinterpret_cast<iconv_t>(-1)) {
+    std::cerr << "iconv_open failed. aborting" << std::endl;
+    abort();
+  }
 
+  size_t out_wchars_len = src.Len();
+  const size_t limit = out_wchars_len * sizeof(wchar_t);
+  wchar_t *d = dest.GetBuf(static_cast<unsigned>(limit));
+  const char *const_src_data = src;
+  char *src_data = const_cast<char*>(const_src_data);
+  size_t in_len = src.Len();
+  size_t out_len = limit;
+  auto dd = reinterpret_cast<char*>(d);
+  const auto ret = iconv(cd, &src_data, &in_len, &dd, &out_len);
+  iconv_close(cd);
+
+  if (ret != -1) {
+    dest.ReleaseBuf_SetEnd(out_wchars_len);
     return;
   }
 
+  std::cerr << "iconv from " << from_cp << " failed." << std::endl;
+  dest.ReleaseBuf_SetEnd(0);
+
   /* if there is mbstowcs() error, we have two ways:
-     
+
      1) change 0x80+ characters to some character: '_'
         in that case we lose data, but we have correct UString()
         and that scheme can show errors to user in early stages,
@@ -352,7 +333,7 @@ void MultiByteToUnicodeString2(UString &dest, const AString &src, UINT codePage)
         but later we still can restore original character.
   */
 
-  
+
   // printf("\nmbstowcs  ERROR !!!!!! s=%s\n", src.Ptr());
   {
     unsigned i;
@@ -394,7 +375,7 @@ static void UnicodeStringToMultiByte2_Native(AString &dest, const UString &src)
 static void UnicodeStringToMultiByte2(AString &dest, const UString &src2, UINT codePage, char defaultChar, bool &defaultCharWasUsed)
 {
   // if (codePage == 1234567) // for debug purposes
-  if (codePage == CP_UTF8 || g_ForceToUTF8)
+  if (codePage == CP_UTF8)
   {
 #if 1
     defaultCharWasUsed = false;
@@ -455,7 +436,7 @@ static void UnicodeStringToMultiByte2(AString &dest, const UString &src2, UINT c
       */
 
       const size_t len2 = wcstombs(d, src, len + 1);
-      
+
       if (len2 != (size_t)-1 && len2 <= limit)
       {
         /*
@@ -607,7 +588,7 @@ const char *GetLocale(void)
 #ifdef _WIN32
   static void Set_ForceToUTF8(bool) {}
 #else
-  static void Set_ForceToUTF8(bool val) { g_ForceToUTF8 = val; }
+  static void Set_ForceToUTF8(bool val) {}
 #endif
 
 static bool Is_Default_Basic_Locale(const char *locale)
@@ -635,7 +616,7 @@ void MY_SetLocale()
     printf("\nGetLocale() : returned : \"%s\"\n", s);
   }
   */
-  
+
   unsigned start = 0;
   // unsigned lim = 0;
   unsigned lim = 3;
@@ -670,7 +651,7 @@ void MY_SetLocale()
       2) environment variable with the same name as the category (see the
       3) the environment variable LANG
     The locale "C" or "POSIX" is a portable locale; it exists on all conforming systems.
-    
+
     for WIN32 : MSDN :
       Sets the locale to the default, which is the user-default
       ANSI code page obtained from the operating system.
@@ -678,16 +659,16 @@ void MY_SetLocale()
       The code page is set to the value returned by GetACP
   */
     const char *newLocale = "";
-    
+
     #ifdef __APPLE__
-    
+
     /* look also CFLocale
        there is no C.UTF-8 in macos
        macos has UTF-8 locale only with some language like en_US.UTF-8
        what is best way to set UTF-8 locale in macos? */
     if (i == 1)
       newLocale = "en_US.UTF-8";
-   
+
     /* file open with non-utf8 sequencies return
       #define EILSEQ    92    // "Illegal byte sequence"
     */
@@ -702,21 +683,21 @@ void MY_SetLocale()
       /* setlocale() in ubuntu allows locales with minor chracter changes in strings
         "en_US.UTF-8" /  "en_US.utf8" */
     }
-    
+
 #endif
-    
+
     // printf("\nsetlocale(LC_ALL, \"%s\") : returned: ", newLocale);
-    
+
     // const char *s =
     setlocale(LC_ALL, newLocale);
-    
+
     /*
     if (!s)
       printf("NULL: can't set locale");
     else
       printf("\"%s\"\n", s);
     */
-    
+
     // request curent locale of program
     const char *locale = GetLocale();
     if (locale)
@@ -760,3 +741,17 @@ void MY_SetLocale()
   #endif
 }
 #endif
+
+void StringConvertInit() {
+#ifndef _WIN32
+  auto on = getenv("OEMCP_NAME");
+  if (on != nullptr) {
+    OEMCP_NAME = on;
+  }
+
+  auto an = getenv("ACP_NAME");
+  if (an != nullptr) {
+    ACP_NAME = an;
+  }
+#endif
+}

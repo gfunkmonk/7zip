@@ -485,7 +485,7 @@ AString operator+(const AString &s1, const char    *s2) { return AString(s1, s1.
 AString operator+(const char    *s1, const AString &s2) { return AString(s1, MyStringLen(s1), s2, s2.Len()); }
 
 static const unsigned kStartStringCapacity = 4;
- 
+
 AString::AString()
 {
   _chars = NULL;
@@ -842,7 +842,7 @@ void AString::Insert(unsigned index, const AString &s)
 void AString::RemoveChar(char ch) throw()
 {
   char *src = _chars;
-  
+
   for (;;)
   {
     char c = *src++;
@@ -853,7 +853,7 @@ void AString::RemoveChar(char ch) throw()
   }
 
   char *dest = src - 1;
-  
+
   for (;;)
   {
     char c = *src++;
@@ -862,7 +862,7 @@ void AString::RemoveChar(char ch) throw()
     if (c != ch)
       *dest++ = c;
   }
-  
+
   *dest = 0;
   _len = (unsigned)(dest - _chars);
 }
@@ -1272,7 +1272,7 @@ void UString::SetFromBstr(LPCOLESTR s)
 
   // if (s)
     wmemcpy(_chars, s, len + 1);
-  
+
   // #endif
 }
 
@@ -1480,7 +1480,7 @@ void UString::Insert(unsigned index, const UString &s)
 void UString::RemoveChar(wchar_t ch) throw()
 {
   wchar_t *src = _chars;
-  
+
   for (;;)
   {
     wchar_t c = *src++;
@@ -1491,7 +1491,7 @@ void UString::RemoveChar(wchar_t ch) throw()
   }
 
   wchar_t *dest = src - 1;
-  
+
   for (;;)
   {
     wchar_t c = *src++;
@@ -1500,7 +1500,7 @@ void UString::RemoveChar(wchar_t ch) throw()
     if (c != ch)
       *dest++ = c;
   }
-  
+
   *dest = 0;
   _len = (unsigned)(dest - _chars);
 }
@@ -1729,7 +1729,7 @@ int MyStringCompareNoCase(const char *s1, const char *s2)
 static inline UINT GetCurrentCodePage()
 {
   #if defined(UNDER_CE) || !defined(_WIN32)
-  return CP_ACP;
+  return CP_UTF8;
   #else
   return ::AreFileApisANSI() ? CP_ACP : CP_OEMCP;
   #endif
@@ -1801,17 +1801,17 @@ bool CStringFinder::FindWord_In_LowCaseAsciiList_NoCase(const char *p, const wch
       c2 = *s2++;
     }
     while (c == c2);
-    
+
     if (c == ' ')
     {
       if (c2 == 0)
         return true;
       continue;
     }
-    
+
     while (*p++ != ' ');
   }
-  
+
   return false;
 }
 
